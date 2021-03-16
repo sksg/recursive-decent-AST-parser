@@ -2,9 +2,14 @@
 
 This is a small attempt to create a parser for the grammar
 ```
-expression → factor ( "/" | "*" ) term
-factor     → unary ( "/" | "*" ) factor
-unary      →  "-" NUMBER | NUMBER
+expression → factor ( ( "+" | "-" ) factor)*
+factor     → unary ( ( "/" | "*" ) unary)*
+unary      → "-" number | number
+number     → sign? unsigned exponent?
+exponent   → ("E" | "e") sign? digit+
+unsigned   → ((digit+ ("." digit*)?) | "." digit+)
+sign       → "+" | "-"
+digit      → "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
 ```
 
 # TODO list
