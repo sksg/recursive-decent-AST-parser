@@ -46,16 +46,26 @@ struct parser {
         return !scanner.at_end() && scanner.peek() == token;
     }
 
-    bool consume(char token) {
+    void skip_whitespace() {
+        while(match(' ') || match('\t') || match('\r') || match('\n'))
+            scanner.advance();
+    }
+
+    enum consume_whitespace_flag {
+        consume_whitespace, keep_whitespace
+    };
+
+    bool consume(char token, consume_whitespace_flag flag=consume_whitespace) {
         if (match(token)) {
             scanner.advance();
+            if (flag == consume_whitespace) skip_whitespace();
             return true;
         }
         return false;
     }
 
     template <int N>
-    bool consume(const char (&token)[N]) {
+    bool consume(const char (&token)[N], consume_whitespace_flag flag=consume_whitespace) {
         unsigned offset = 0;
         while (!scanner.at_end(offset) && (offset < N - 1)) {
             if (scanner.peek(offset) != token[offset])
@@ -66,11 +76,14 @@ struct parser {
             return false;
 
         scanner.advance(offset);
+        if (flag == consume_whitespace) skip_whitespace();
         return true;
     }
 
     bool consume_end_statement() {
-        return consume(';');
+        while(match(' ') || match('\t') || match('\r'))
+            scanner.advance();
+        return consume('\n') || consume(';');
     }
 
     long consume_integer() {
@@ -103,13 +116,13 @@ struct parser {
         scanner.advance();
 
         long factor = 10; 
-        double number = digit / factor;
+        double number = double(digit) / factor;
         while (!scanner.at_end()) {
             digit = scanner.peek() - '0';
             if (digit < 0 || 9 < digit)
                 break;
             factor *= 10;
-            number = number + digit / factor;
+            number += double(digit) / factor;
             scanner.advance();
         }
         return number;
@@ -118,8 +131,7 @@ struct parser {
     token consume_token() {
         if (scanner.at_end())
             return {};
-        
-        
+
         auto current = scanner.peek();
         if (
             current != '_' && (
@@ -147,6 +159,7 @@ struct parser {
             scanner.advance();
         }
 
+        skip_whitespace();
         return token;
     }
 
@@ -157,15 +170,22 @@ struct parser {
         if (integral_part < 0 && decimal_part < 0)
             return syntax::fail();
 
+
         double exponent_multiplier = 1;
-        if (consume('E') || consume('e')) {
-            int sign = consume('+') || !consume('-') ? 1 : -1;
+        if (consume('E', keep_whitespace) || consume('e', keep_whitespace)) {
+            int sign = consume('+', keep_whitespace) || !consume('-', keep_whitespace) ? 1 : -1;
             auto exponent_part = consume_integer();
             exponent_multiplier = pow(10, sign * exponent_part);
         }
 
         if (decimal_part < 0 && exponent_multiplier >= 1)
             return syntax(integral_part * (long)exponent_multiplier);
+        else if (integral_part < 0 && decimal_part < 0)
+            return syntax(exponent_multiplier);
+        else if (integral_part < 0)
+            return syntax(decimal_part * exponent_multiplier);
+        else if (decimal_part < 0)
+            return syntax(integral_part * exponent_multiplier);
         else
             return syntax((integral_part + decimal_part) * exponent_multiplier);
     }
@@ -298,12 +318,16 @@ struct parser {
             return syntax::fail();
         }
         auto type = identifier();
+        if (type.failed())
+            type = syntax::none();
         auto expr = consume('=') ? expression() : syntax::fail();
 
         return syntax(std::move(var), std::move(type), std::move(expr));
     }
 
     syntax statement() {
+        skip_whitespace();
+
         auto stmt = declaration();
         if (stmt.failed())
             stmt = assignment();
