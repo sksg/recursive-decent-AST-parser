@@ -7,11 +7,10 @@ int main() {
         "Input a line of code, and the parser will return the AST. "
         "Exit by closing input stream e.g. ctrl+d (unix) or ctrl+z (win).";
     auto prompt = "parser> ";
-    
+
     std::cout << short_welcome << std::endl;
     std::cout << long_welcome << std::endl;
     std::cout << std::endl << prompt << std::flush;
-
 
     for ( // Infinite REPL loop
         std::string line;
@@ -19,8 +18,8 @@ int main() {
         std::cout << prompt << std::flush
     ) {
 
-        auto expression = parser::from_string(line).expression();
-        std::cout << expression << std::endl;
+        auto statement = parser::from_string(line).statement();
+        std::cout << statement << std::endl;
     }
 
     std::cout << "Exiting REPL..." << std::endl;

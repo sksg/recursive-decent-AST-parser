@@ -1,188 +1,234 @@
 #pragma once
+#include "ast.hpp"
+
 #include <memory>
-#include <iostream>
-#include <string>
 #include <cmath>
-#include <cassert>
+#include <cassert> 
 
-namespace ast {
-    struct expression {
-        enum kind_t {
-            unknown,
-            // binaries
-            addition, subtraction, multiplication, divition,
-            // unaries
-            negation,
-            // literals
-            literal_int, literal_float
-        } kind = unknown;
-
-        union {
-            long int_value;
-            double float_value;
-            expression* inner;
-            struct {
-                expression* left, *right;
-            };
-        };
-
-        static expression* new_binary(kind_t kind, expression* left, expression* right) {
-            auto binary = new expression;
-            binary->kind = kind;
-            binary->left = left;
-            binary->right = right;
-            return binary;
-        }
-
-        static expression* new_unary(kind_t kind, expression* inner) {
-            auto unary = new expression;
-            unary->kind = kind;
-            unary->inner = inner;
-            return unary;
-        }
-
-        static expression* new_literal(long value) {
-            auto literal = new expression;
-            literal->kind = literal_int;
-            literal->int_value = value;
-            return literal;
-        }
-
-        static expression* new_literal(double value) {
-            auto literal = new expression;
-            literal->kind = literal_float;
-            literal->float_value = value;
-            return literal;
-        }
-
-        ~expression() {
-            switch (kind) {
-                case addition:
-                case subtraction:
-                case multiplication:
-                case divition:
-                    delete left;
-                    delete right;
-                    break;
-                case negation:
-                    delete inner;
-                    break;
-                default:
-                    break;
-            }
-        }
-    };
-}
-
-std::ostream& operator<<(std::ostream &str, ast::expression* expr) {
-    switch (expr->kind) {
-        case ast::expression::addition:
-            str << "(+ " << expr->left << " " << expr->right << ")"; break;
-        case ast::expression::subtraction:
-            str << "(- " << expr->left << " " << expr->right << ")"; break;
-        case ast::expression::multiplication:
-            str << "(* " << expr->left << " " << expr->right << ")"; break;
-        case ast::expression::divition:
-            str << "(/ " << expr->left << " " << expr->right << ")"; break;
-        case ast::expression::negation:
-            str << "(- " << expr->inner << ")"; break;
-        case ast::expression::literal_int:
-            str << expr->int_value << "i"; break;
-        case ast::expression::literal_float:
-            str << expr->float_value << "f"; break;
-        default:
-            break;
-    }
-    return str;
-}
-
-struct parser {
+struct source_scanner {
     const char* position = nullptr;
     const char* const end = nullptr;
 
-    static parser from_string(const std::string &str) {
+    static source_scanner from_string(const std::string &str) {
         return {str.data(), str.data() + str.length()};
     }
 
-    bool not_at_end() {
-        assert(position <= end);
-        return position < end;
+    bool at_end(unsigned offset = 0) {
+        assert(position + offset <= end);
+        return position + offset >= end;
     }
 
-    bool consume_match(char token) {
-        assert(position < end);
-        if (position[0] == token) {
-            position++;
+    char peek(unsigned offset = 0) {
+        assert(position + offset < end);
+        return position[offset];
+    }
+
+    void advance(unsigned offset = 1) {
+        assert(position + offset <= end);
+        position += offset;
+    }
+};
+
+
+struct token {
+    const char* position = nullptr;
+    long length = 0;
+};
+
+struct parser {
+    source_scanner scanner;
+
+    static parser from_string(const std::string &str) {
+        return {source_scanner::from_string(str)};
+    }
+
+    bool match(char token) {
+        return !scanner.at_end() && scanner.peek() == token;
+    }
+
+    bool consume(char token) {
+        if (match(token)) {
+            scanner.advance();
             return true;
         }
         return false;
     }
 
-    long digits;
-    double decimal_factor;
-
-    bool consume_match_digits() {
-        assert(position < end);
-        digits = 0;
-        decimal_factor = 1;
-        bool match = false;
-        while(position < end) {
-            switch (position[0]) {
-                case '0': digits *= 10; break;
-                case '1': digits =  digits * 10 + 1; break;
-                case '2': digits =  digits * 10 + 2; break;
-                case '3': digits =  digits * 10 + 3; break;
-                case '4': digits =  digits * 10 + 4; break;
-                case '5': digits =  digits * 10 + 5; break;
-                case '6': digits =  digits * 10 + 6; break;
-                case '7': digits =  digits * 10 + 7; break;
-                case '8': digits =  digits * 10 + 8; break;
-                case '9': digits =  digits * 10 + 9; break;
-                default: return match;
-            }
-            match = true;
-            position++;
-            decimal_factor *= 10;
+    template <int N>
+    bool consume(const char (&token)[N]) {
+        unsigned offset = 0;
+        while (!scanner.at_end(offset) && (offset < N - 1)) {
+            if (scanner.peek(offset) != token[offset])
+                return false;
+            ++offset;
         }
+        if (offset != (N - 1))
+            return false;
 
-        return match;
+        scanner.advance(offset);
+        return true;
     }
 
-    ast::expression* expression() {
-        auto expr = factor();
+    bool consume_end_statement() {
+        return consume(';');
+    }
 
-        while (not_at_end()) {
-            if (consume_match('+'))
-                expr = ast::expression::new_binary(
-                    ast::expression::addition,
-                    expr, factor()
-                );
-            else if (consume_match('-'))
-                expr = ast::expression::new_binary(
-                    ast::expression::subtraction,
-                    expr, factor()
-                );
-            else
+    long consume_integer() {
+        if (scanner.at_end())
+            return -1;
+
+        int digit = scanner.peek() - '0';
+        if (digit < 0 || 9 < digit)
+            return -1;
+        scanner.advance();
+
+        long number = digit;
+        while (!scanner.at_end()) {
+            digit = scanner.peek() - '0';
+            if (digit < 0 || 9 < digit)
                 break;
+            number = number * 10 + digit;
+            scanner.advance();
+        }
+        return number;
+    }
+
+    double consume_decimals() {
+        if (scanner.at_end() || !consume('.'))
+            return -1;
+
+        int digit = scanner.peek() - '0';
+        if (digit < 0 || 9 < digit)
+            return 0;
+        scanner.advance();
+
+        long factor = 10; 
+        double number = digit / factor;
+        while (!scanner.at_end()) {
+            digit = scanner.peek() - '0';
+            if (digit < 0 || 9 < digit)
+                break;
+            factor *= 10;
+            number = number + digit / factor;
+            scanner.advance();
+        }
+        return number;
+    }
+
+    token consume_token() {
+        if (scanner.at_end())
+            return {};
+        
+        
+        auto current = scanner.peek();
+        if (
+            current != '_' && (
+                current < 'a' || 'z' < current
+            ) && (
+                current < 'A' || 'Z' < current
+            )
+        ) return {};
+
+        token token{scanner.position, 1};
+        scanner.advance();
+
+        while(!scanner.at_end()) {
+            current = scanner.peek();
+            if (
+                current != '_' && (
+                    current < 'a' || 'z' < current
+                ) && (
+                    current < 'A' || 'Z' < current
+                ) && (
+                    current < '0' || '9' < current
+                )
+            ) break;
+            token.length++;
+            scanner.advance();
         }
 
+        return token;
+    }
+
+    syntax number() {
+        auto integral_part = consume_integer();
+        auto decimal_part = consume_decimals();
+        
+        if (integral_part < 0 && decimal_part < 0)
+            return syntax::none();
+
+        double exponent_multiplier = 1;
+        if (consume('E') || consume('e')) {
+            int sign = consume('+') || !consume('-') ? 1 : -1;
+            auto exponent_part = consume_integer();
+            exponent_multiplier = pow(10, sign * exponent_part);
+        }
+
+        if (decimal_part < 0 && exponent_multiplier >= 1)
+            return syntax(integral_part * (long)exponent_multiplier);
+        else
+            return syntax((integral_part + decimal_part) * exponent_multiplier);
+    }
+
+    syntax identifier() {
+        auto token = consume_token();
+        if (token.position != nullptr)
+            return syntax(token.position, token.length);
+        else
+            return syntax::none();
+    }
+
+    syntax literal() {
+        if (consume('(')) {
+            auto expr = expression();
+            if (consume(')'))
+                return expr;
+            else
+                throw std::runtime_error("Unbalanced parenthesis!");
+        }
+        if (consume("true"))
+            return syntax(true);
+        if (consume("false"))
+            return syntax(false);
+
+        auto expr = identifier();
+        if (expr.is_none())
+            return number();
         return expr;
     }
 
-    ast::expression* factor() {
+    syntax unary() {
+        if (consume('+')) {
+            auto inner = literal();
+            if (inner.kind != syntax::NONE)
+                return syntax(syntax::PLUS, std::move(inner));
+            else 
+                throw std::runtime_error("Missing literal value!");
+        } if (consume('-')) {
+            auto inner = literal();
+            if (inner.kind != syntax::NONE)
+                return syntax(syntax::MINUS, std::move(inner));
+            else 
+                throw std::runtime_error("Missing literal value!");
+        } if (consume('!')) {
+            auto inner = literal();
+            if (inner.kind != syntax::NONE)
+                return syntax(syntax::NOT, std::move(inner));
+            else 
+                throw std::runtime_error("Missing literal value!");
+        }
+
+        return literal();
+    }
+
+    syntax product() {
         auto expr = unary();
 
-        while (not_at_end()) {
-            if (consume_match('/'))
-                expr = ast::expression::new_binary(
-                    ast::expression::divition,
-                    expr, factor()
-                );
-            else if (consume_match('*'))
-                expr = ast::expression::new_binary(
-                    ast::expression::multiplication,
-                    expr, factor()
-                );
+        while (!scanner.at_end()) {
+            if (consume('/'))
+                expr = syntax(syntax::DIVITION, std::move(expr), product());
+            else if (consume('*'))
+                expr = syntax(syntax::MULTIPLICATION, std::move(expr), product());
             else
                 break;
         }
@@ -190,58 +236,81 @@ struct parser {
         return expr;
     }
 
-    ast::expression* unary() {
-        if (not_at_end() && consume_match('-'))
-            return ast::expression::new_unary(
-                ast::expression::negation,
-                number()
-            );
-        
-        return number();
-    }
+    syntax sum() {
+        auto expr = product();
 
-    ast::expression* number() {
-        int sign = 1;
-        if (consume_match('+')) {}
-        else if (consume_match('-'))
-            sign = -1;
-
-        bool is_float = false;
-        long integral_part = 0;
-        double decimal_part = 0;
-        double exponent = 1;
-        if (not_at_end() && consume_match_digits()) {
-            integral_part = sign * digits;
-            if (not_at_end() && consume_match('.')) {
-                is_float = true;
-                if (not_at_end() && consume_match_digits())
-                    decimal_part = digits / decimal_factor;
-            }
-        } else if (
-            not_at_end() && consume_match('.') &&
-            not_at_end() && consume_match_digits()
-        ) {
-            is_float = true;
-            decimal_part = digits / decimal_factor;
-        } else
-            throw std::runtime_error("Missing number");
-
-        if (not_at_end() && (consume_match('E') || consume_match('e'))) {
-            if (not_at_end() && consume_match('-')) {
-                is_float = true;
-                consume_match_digits();
-                exponent = pow(10, -digits);
-            } else if (not_at_end()) {
-                consume_match('+');
-                consume_match_digits();
-                exponent = pow(10, digits);
-            } else
-                throw std::runtime_error("Ill formed exponent");
+        while (!scanner.at_end()) {
+            if (consume('+'))
+                expr = syntax(syntax::ADDITION, std::move(expr), product());
+            else if (consume('-'))
+                expr = syntax(syntax::SUBTRACTION, std::move(expr), product());
+            else
+                break;
         }
 
-        if (is_float)
-            return ast::expression::new_literal((integral_part + decimal_part) * exponent);
-        else
-            return ast::expression::new_literal(integral_part * long(exponent));
+        return expr;
+    }
+
+    syntax comparison() {
+        auto expr = sum();
+
+        while (!scanner.at_end()) {
+            if (consume('<'))
+                expr = syntax(syntax::LESS, std::move(expr), sum());
+            else if (consume('>'))
+                expr = syntax(syntax::GREATER, std::move(expr), sum());
+            else if (consume("<="))
+                expr = syntax(syntax::LESS_EQUAL, std::move(expr), sum());
+            else if (consume(">="))
+                expr = syntax(syntax::GREATER_EQUAL, std::move(expr), sum());
+            else if (consume("!="))
+                expr = syntax(syntax::NOT_EQUAL, std::move(expr), sum());
+            else if (consume("=="))
+                expr = syntax(syntax::EQUAL, std::move(expr), sum());
+            else
+                break;
+        }
+
+        return expr;
+    }
+
+    syntax expression() {
+        return comparison();
+    }
+
+    syntax assignment() {
+        auto pos = scanner.position;
+        auto var = identifier();
+        if (var.is_none() || !consume('=')) {
+            scanner.position = pos;
+            return syntax::none();
+        }
+        auto expr = expression();
+
+        return syntax(syntax::ASSIGNMENT, std::move(var), std::move(expr));
+    }
+
+    syntax declaration() {
+        auto pos = scanner.position;
+        auto var = identifier();
+        if (var.is_none() || !consume(':')) {
+            scanner.position = pos;
+            return syntax::none();
+        }
+        auto type = identifier();
+        auto expr = consume('=') ? expression() : syntax::none();
+
+        return syntax(std::move(var), std::move(type), std::move(expr));
+    }
+
+    syntax statement() {
+        auto stmt = declaration();
+        if (stmt.is_none())
+            stmt = assignment();
+        if (stmt.is_none())
+            stmt = expression();
+        if (!stmt.is_none())
+            consume_end_statement();
+        return stmt;
     }
 };
