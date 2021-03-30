@@ -201,20 +201,10 @@ syntax syntax::unknown() {
     return syntax();
 }
 
-syntax syntax::none() {
-    auto none = syntax();
-    none.kind = syntax::NONE;
-    return none;
-}
-
 syntax syntax::fail() {
-    auto none = syntax();
-    none.kind = syntax::FAILED;
-    return none;
-}
-
-bool syntax::is_none() {
-    return kind == syntax::NONE;
+    auto fail = syntax();
+    fail.kind = syntax::FAILED;
+    return fail;
 }
 
 bool syntax::failed() {
@@ -288,8 +278,6 @@ std::ostream& operator<<(std::ostream &str, const syntax& ast) {
             str << ast.float_value << "f"; break;
         case syntax::BOOL:
             str << (ast.bool_value ? "true" : "false"); break;
-        case syntax::NONE:
-            str << "none"; break;
         case syntax::FAILED:
             str << "failed"; break;
         case syntax::UNKNOWN:

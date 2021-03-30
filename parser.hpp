@@ -155,7 +155,7 @@ struct parser {
         auto decimal_part = consume_decimals();
         
         if (integral_part < 0 && decimal_part < 0)
-            return syntax::none();
+            return syntax::fail();
 
         double exponent_multiplier = 1;
         if (consume('E') || consume('e')) {
@@ -175,7 +175,7 @@ struct parser {
         if (token.position != nullptr)
             return syntax(token.position, token.length);
         else
-            return syntax::none();
+            return syntax::fail();
     }
 
     syntax literal() {
@@ -192,7 +192,7 @@ struct parser {
             return syntax(false);
 
         auto expr = identifier();
-        if (expr.is_none())
+        if (expr.failed())
             return number();
         return expr;
     }
@@ -200,22 +200,22 @@ struct parser {
     syntax unary() {
         if (consume('+')) {
             auto inner = literal();
-            if (inner.kind != syntax::NONE)
-                return syntax(syntax::PLUS, std::move(inner));
-            else 
+            if (inner.failed())
                 throw std::runtime_error("Missing literal value!");
+            else
+                return syntax(syntax::PLUS, std::move(inner));
         } if (consume('-')) {
             auto inner = literal();
-            if (inner.kind != syntax::NONE)
-                return syntax(syntax::MINUS, std::move(inner));
-            else 
+            if (inner.failed())
                 throw std::runtime_error("Missing literal value!");
+            else
+                return syntax(syntax::MINUS, std::move(inner));
         } if (consume('!')) {
             auto inner = literal();
-            if (inner.kind != syntax::NONE)
-                return syntax(syntax::NOT, std::move(inner));
-            else 
+            if (inner.failed())
                 throw std::runtime_error("Missing literal value!");
+            else
+                return syntax(syntax::NOT, std::move(inner));
         }
 
         return literal();
@@ -281,9 +281,9 @@ struct parser {
     syntax assignment() {
         auto pos = scanner.position;
         auto var = identifier();
-        if (var.is_none() || !consume('=')) {
+        if (var.failed() || !consume('=')) {
             scanner.position = pos;
-            return syntax::none();
+            return syntax::fail();
         }
         auto expr = expression();
 
@@ -293,23 +293,23 @@ struct parser {
     syntax declaration() {
         auto pos = scanner.position;
         auto var = identifier();
-        if (var.is_none() || !consume(':')) {
+        if (var.failed() || !consume(':')) {
             scanner.position = pos;
-            return syntax::none();
+            return syntax::fail();
         }
         auto type = identifier();
-        auto expr = consume('=') ? expression() : syntax::none();
+        auto expr = consume('=') ? expression() : syntax::fail();
 
         return syntax(std::move(var), std::move(type), std::move(expr));
     }
 
     syntax statement() {
         auto stmt = declaration();
-        if (stmt.is_none())
+        if (stmt.failed())
             stmt = assignment();
-        if (stmt.is_none())
+        if (stmt.failed())
             stmt = expression();
-        if (!stmt.is_none())
+        if (!stmt.failed())
             consume_end_statement();
         return stmt;
     }
