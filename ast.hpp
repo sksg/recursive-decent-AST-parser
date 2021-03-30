@@ -5,8 +5,6 @@
 
 struct syntax {
     enum ENUM {
-        UNKNOWN,
-        NONE,
         FAILED,
         DECLARATION,
         // binaries
@@ -18,7 +16,7 @@ struct syntax {
         PLUS, MINUS, NOT,
         // literals
         IDENTIFIER, INT, FLOAT, BOOL
-    } kind = UNKNOWN;
+    } kind = FAILED;
 
     struct declaration_t;
     struct binary_t;
@@ -58,12 +56,9 @@ struct syntax {
     syntax(long value);
     syntax(double value);
     syntax(bool value);
-    syntax();  // Unknown
-    static syntax unknown();
-    static syntax none();
+    syntax();  // same as fail()
     static syntax fail();
 
-    bool is_none();
     bool failed();
 
     ~syntax();
@@ -118,7 +113,7 @@ syntax::syntax(syntax&& other) {
             bool_value = other.bool_value; break;
     };
     kind = other.kind;
-    other.kind = NONE;
+    other.kind = FAILED;
 }
 
 syntax& syntax::operator=(syntax&& other) {
@@ -151,7 +146,7 @@ syntax& syntax::operator=(syntax&& other) {
             bool_value = other.bool_value; break;
     };
     kind = other.kind;
-    other.kind = NONE;
+    other.kind = FAILED;
     return *this;
 }
 
@@ -197,9 +192,6 @@ syntax::syntax(bool value) {
 }
 
 syntax::syntax() {}
-syntax syntax::unknown() {
-    return syntax();
-}
 
 syntax syntax::fail() {
     auto fail = syntax();
@@ -235,7 +227,7 @@ syntax::~syntax() {
         case IDENTIFIER:
             delete id; break;
     };
-    kind = UNKNOWN;
+    kind = FAILED;
 }
 
 std::ostream& operator<<(std::ostream &str, const syntax& ast) {
@@ -280,8 +272,6 @@ std::ostream& operator<<(std::ostream &str, const syntax& ast) {
             str << (ast.bool_value ? "true" : "false"); break;
         case syntax::FAILED:
             str << "failed"; break;
-        case syntax::UNKNOWN:
-            str << "unknown"; break;
     }
     return str;
 }
