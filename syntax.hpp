@@ -61,6 +61,7 @@ struct syntax {
     static syntax fail();
     static syntax none();
 
+    bool is_none();
     bool failed();
 
     ~syntax();
@@ -205,6 +206,10 @@ syntax syntax::none() {
     auto none = syntax();
     none.kind = syntax::NONE;
     return none;
+}
+
+bool syntax::is_none() {
+    return kind == syntax::NONE;
 }
 
 bool syntax::failed() {

@@ -18,7 +18,7 @@ int main() {
         std::cout << prompt << std::flush
     ) {
 
-        auto statement = parser::from_string(line).statement();
+        auto statement = parser::from_string(line).parse();
         std::cout << statement << std::endl;
     }
 

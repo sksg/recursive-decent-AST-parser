@@ -1,201 +1,88 @@
 #pragma once
-#include "ast.hpp"
+#include "syntax.hpp"
+#include "token.hpp"
 
 #include <memory>
 #include <cmath>
-#include <cassert> 
-
-struct source_scanner {
-    const char* position = nullptr;
-    const char* const end = nullptr;
-
-    static source_scanner from_string(const std::string &str) {
-        return {str.data(), str.data() + str.length()};
-    }
-
-    bool at_end(unsigned offset = 0) {
-        assert(position + offset <= end);
-        return position + offset >= end;
-    }
-
-    char peek(unsigned offset = 0) {
-        assert(position + offset < end);
-        return position[offset];
-    }
-
-    void advance(unsigned offset = 1) {
-        assert(position + offset <= end);
-        position += offset;
-    }
-};
-
-
-struct token {
-    const char* position = nullptr;
-    long length = 0;
-};
+#include <cassert>
 
 struct parser {
-    source_scanner scanner;
+    string_tokenizer tokenizer;
+    token previous_token, current_token, next_token;
 
-    static parser from_string(const std::string &str) {
-        return {source_scanner::from_string(str)};
-    }
-
-    bool match(char token) {
-        return !scanner.at_end() && scanner.peek() == token;
-    }
-
-    void skip_whitespace() {
-        while(match(' ') || match('\t') || match('\r') || match('\n'))
-            scanner.advance();
-    }
-
-    enum consume_whitespace_flag {
-        consume_whitespace, keep_whitespace
+    struct failure {
+        const char* title, *message, *after_message;
+        token previous_token, bad_token;
     };
 
-    bool consume(char token, consume_whitespace_flag flag=consume_whitespace) {
-        if (match(token)) {
-            scanner.advance();
-            if (flag == consume_whitespace) skip_whitespace();
+    failure fail(const char* title, const char* message, const char* after_message = nullptr) {
+        return failure{title, message, after_message, previous_token, current_token};
+    }
+
+    static parser from_string(const std::string &str) {
+        auto tokenizer = string_tokenizer::from_string(str);
+        auto first = tokenizer.next();
+        auto second = tokenizer.next();
+        return {tokenizer, token::begin_input(str.data()), first, second};
+    }
+
+    bool at_end() {
+        return current_token.kind == token::END_OF_INPUT;
+    }
+
+    template <typename T>
+    bool match(T kind) {
+        return current_token.kind == (token::ENUM)kind;
+    }
+
+    bool match(const char kind[3]) {
+        return (
+            current_token.kind == (token::ENUM)(kind[0] + kind[1])
+        );
+    }
+
+    template <typename T1, typename T2>
+    bool match(T1 current_kind, T2 next_kind) {
+        return (
+            current_token.kind == (token::ENUM)current_kind &&
+            next_token.kind == (token::ENUM)next_kind
+        );
+    }
+
+    void advance() {
+        // std::cout << "Consumed token: " << current_token << std::endl;
+        previous_token = current_token;
+        current_token = next_token;
+        next_token = tokenizer.next();
+    }
+
+    template <typename T>
+    bool consume(T kind) {
+        if (match(kind)) {
+            advance();
             return true;
         }
         return false;
     }
 
-    template <int N>
-    bool consume(const char (&token)[N], consume_whitespace_flag flag=consume_whitespace) {
-        unsigned offset = 0;
-        while (!scanner.at_end(offset) && (offset < N - 1)) {
-            if (scanner.peek(offset) != token[offset])
-                return false;
-            ++offset;
-        }
-        if (offset != (N - 1))
-            return false;
-
-        scanner.advance(offset);
-        if (flag == consume_whitespace) skip_whitespace();
-        return true;
-    }
-
-    bool consume_end_statement() {
-        while(match(' ') || match('\t') || match('\r'))
-            scanner.advance();
-        return consume('\n') || consume(';');
-    }
-
-    long consume_integer() {
-        if (scanner.at_end())
-            return -1;
-
-        int digit = scanner.peek() - '0';
-        if (digit < 0 || 9 < digit)
-            return -1;
-        scanner.advance();
-
-        long number = digit;
-        while (!scanner.at_end()) {
-            digit = scanner.peek() - '0';
-            if (digit < 0 || 9 < digit)
-                break;
-            number = number * 10 + digit;
-            scanner.advance();
-        }
-        return number;
-    }
-
-    double consume_decimals() {
-        if (scanner.at_end() || !consume('.'))
-            return -1;
-
-        int digit = scanner.peek() - '0';
-        if (digit < 0 || 9 < digit)
-            return 0;
-        scanner.advance();
-
-        long factor = 10; 
-        double number = double(digit) / factor;
-        while (!scanner.at_end()) {
-            digit = scanner.peek() - '0';
-            if (digit < 0 || 9 < digit)
-                break;
-            factor *= 10;
-            number += double(digit) / factor;
-            scanner.advance();
-        }
-        return number;
-    }
-
-    token consume_token() {
-        if (scanner.at_end())
-            return {};
-
-        auto current = scanner.peek();
-        if (
-            current != '_' && (
-                current < 'a' || 'z' < current
-            ) && (
-                current < 'A' || 'Z' < current
-            )
-        ) return {};
-
-        token token{scanner.position, 1};
-        scanner.advance();
-
-        while(!scanner.at_end()) {
-            current = scanner.peek();
-            if (
-                current != '_' && (
-                    current < 'a' || 'z' < current
-                ) && (
-                    current < 'A' || 'Z' < current
-                ) && (
-                    current < '0' || '9' < current
-                )
-            ) break;
-            token.length++;
-            scanner.advance();
-        }
-
-        skip_whitespace();
-        return token;
-    }
-
     syntax number() {
-        auto integral_part = consume_integer();
-        auto decimal_part = consume_decimals();
-        
-        if (integral_part < 0 && decimal_part < 0)
-            return syntax::fail();
-
-
-        double exponent_multiplier = 1;
-        if (consume('E', keep_whitespace) || consume('e', keep_whitespace)) {
-            int sign = consume('+', keep_whitespace) || !consume('-', keep_whitespace) ? 1 : -1;
-            auto exponent_part = consume_integer();
-            exponent_multiplier = pow(10, sign * exponent_part);
+        if (match(token::INT)) {
+            auto num = syntax((long)current_token.int_value);
+            advance();
+            return num;
         }
-
-        if (decimal_part < 0 && exponent_multiplier >= 1)
-            return syntax(integral_part * (long)exponent_multiplier);
-        else if (integral_part < 0 && decimal_part < 0)
-            return syntax(exponent_multiplier);
-        else if (integral_part < 0)
-            return syntax(decimal_part * exponent_multiplier);
-        else if (decimal_part < 0)
-            return syntax(integral_part * exponent_multiplier);
-        else
-            return syntax((integral_part + decimal_part) * exponent_multiplier);
+        if (match(token::FLOAT)) {
+            auto num = syntax(current_token.float_value);
+            advance();
+            return num;
+        }
+        return syntax::fail();
     }
 
     syntax identifier() {
-        auto token = consume_token();
-        if (token.position != nullptr)
-            return syntax(token.position, token.length);
-        else
-            return syntax::fail();
+        auto id = syntax(current_token.position, current_token.length);
+        advance();
+        return id;
     }
 
     syntax literal() {
@@ -204,52 +91,74 @@ struct parser {
             if (consume(')'))
                 return expr;
             else
-                throw std::runtime_error("Unbalanced parenthesis!");
+                throw fail("Unbalanced parenthesis!", "Expected a closing parenthesis ')'.");
         }
         if (consume("true"))
             return syntax(true);
         if (consume("false"))
             return syntax(false);
 
-        auto expr = identifier();
+        auto expr = match(token::IDENTIFIER) ? identifier() : number();
+
         if (expr.failed())
-            return number();
+            throw fail(
+                "Missing value!",
+                "Expected a literal value after ", /*previous_token*/
+                " e.g. group, identifier, number, or boolean."
+            );
+
         return expr;
     }
 
     syntax unary() {
-        if (consume('+')) {
-            auto inner = literal();
-            if (inner.failed())
-                throw std::runtime_error("Missing literal value!");
-            else
-                return syntax(syntax::PLUS, std::move(inner));
-        } if (consume('-')) {
-            auto inner = literal();
-            if (inner.failed())
-                throw std::runtime_error("Missing literal value!");
-            else
-                return syntax(syntax::MINUS, std::move(inner));
-        } if (consume('!')) {
-            auto inner = literal();
-            if (inner.failed())
-                throw std::runtime_error("Missing literal value!");
-            else
-                return syntax(syntax::NOT, std::move(inner));
-        }
+        syntax::ENUM unary_kind = syntax::NONE;
 
-        return literal();
+        if (consume('+')) {
+            unary_kind = syntax::PLUS;
+        } else if (consume('-')) {
+            unary_kind = syntax::MINUS;
+        } else if (consume('!')) {
+            unary_kind = syntax::NOT;
+        } else
+            return literal();
+
+        auto inner = literal();
+
+        if (
+            unary_kind == syntax::PLUS && (
+                inner.kind == syntax::INT || inner.kind == syntax::FLOAT
+            )
+        ) return inner; // NO-OP
+
+        if (unary_kind == syntax::MINUS && inner.kind == syntax::INT)
+            inner.int_value = -inner.int_value;
+        if (unary_kind == syntax::MINUS && inner.kind == syntax::FLOAT)
+            inner.float_value = -inner.float_value;
+
+        return syntax(unary_kind, std::move(inner));
     }
 
     syntax product() {
         auto expr = unary();
 
-        while (!scanner.at_end()) {
-            if (consume('/'))
-                expr = syntax(syntax::DIVITION, std::move(expr), product());
-            else if (consume('*'))
-                expr = syntax(syntax::MULTIPLICATION, std::move(expr), product());
-            else
+        while (!at_end()) {
+            if (consume('/')) {
+                if (match('+') || match('-') || match('!'))
+                    throw fail(
+                        "Invalid syntax!",
+                        "Unary operators must be surrounded by '(' and ')' when "
+                        "used on the right of a binary expression."
+                    );
+                expr = syntax(syntax::DIVITION, std::move(expr), literal());
+            } else if (consume('*')) {
+                if (match('+') || match('-') || match('!'))
+                    throw fail(
+                        "Invalid syntax!",
+                        "Unary operators must be surrounded by '(' and ')' when "
+                        "used on the right of a binary expression."
+                    );
+                expr = syntax(syntax::MULTIPLICATION, std::move(expr), literal());
+            } else
                 break;
         }
 
@@ -259,12 +168,24 @@ struct parser {
     syntax sum() {
         auto expr = product();
 
-        while (!scanner.at_end()) {
-            if (consume('+'))
+        while (!at_end()) {
+            if (consume('+')) {
+                if (match('+') || match('-') || match('!'))
+                    throw fail(
+                        "Invalid syntax!",
+                        "Unary operators must be surrounded by '(' and ')' when "
+                        "used on the right of a binary expression."
+                    );
                 expr = syntax(syntax::ADDITION, std::move(expr), product());
-            else if (consume('-'))
+            } else if (consume('-')) {
+                if (match('+') || match('-') || match('!'))
+                    throw fail(
+                        "Invalid syntax!",
+                        "Unary operators must be surrounded by '(' and ')' when "
+                        "used on the right of a binary expression."
+                    );
                 expr = syntax(syntax::SUBTRACTION, std::move(expr), product());
-            else
+            } else
                 break;
         }
 
@@ -274,12 +195,8 @@ struct parser {
     syntax comparison() {
         auto expr = sum();
 
-        while (!scanner.at_end()) {
-            if (consume('<'))
-                expr = syntax(syntax::LESS, std::move(expr), sum());
-            else if (consume('>'))
-                expr = syntax(syntax::GREATER, std::move(expr), sum());
-            else if (consume("<="))
+        while (!at_end()) {
+            if (consume("<="))
                 expr = syntax(syntax::LESS_EQUAL, std::move(expr), sum());
             else if (consume(">="))
                 expr = syntax(syntax::GREATER_EQUAL, std::move(expr), sum());
@@ -287,6 +204,10 @@ struct parser {
                 expr = syntax(syntax::NOT_EQUAL, std::move(expr), sum());
             else if (consume("=="))
                 expr = syntax(syntax::EQUAL, std::move(expr), sum());
+            else if (consume('<'))
+                expr = syntax(syntax::LESS, std::move(expr), sum());
+            else if (consume('>'))
+                expr = syntax(syntax::GREATER, std::move(expr), sum());
             else
                 break;
         }
@@ -299,42 +220,71 @@ struct parser {
     }
 
     syntax assignment() {
-        auto pos = scanner.position;
         auto var = identifier();
-        if (var.failed() || !consume('=')) {
-            scanner.position = pos;
-            return syntax::fail();
-        }
+        assert(consume('='));  // We already checked this in statement()!!
         auto expr = expression();
 
         return syntax(syntax::ASSIGNMENT, std::move(var), std::move(expr));
     }
 
     syntax declaration() {
-        auto pos = scanner.position;
         auto var = identifier();
-        if (var.failed() || !consume(':')) {
-            scanner.position = pos;
-            return syntax::fail();
-        }
-        auto type = identifier();
-        if (type.failed())
-            type = syntax::none();
-        auto expr = consume('=') ? expression() : syntax::fail();
+        assert(consume(':'));  // We already checked this in statement()!!
+        auto type = match(token::IDENTIFIER) ? identifier() : syntax::none();
+        auto expr = consume('=') ? expression() : syntax::none();
+
+        if (type.is_none() && expr.is_none())
+            throw fail(
+                "Malformed variable declaration!",
+                "You must declare a variable with either a type or an expression."
+            );
 
         return syntax(std::move(var), std::move(type), std::move(expr));
     }
 
     syntax statement() {
-        skip_whitespace();
+        syntax stmt;
 
-        auto stmt = declaration();
-        if (stmt.failed())
+        if (match(token::IDENTIFIER, ':'))
+            stmt = declaration();
+        else if (match(token::IDENTIFIER, '='))
             stmt = assignment();
-        if (stmt.failed())
+        else 
             stmt = expression();
-        if (!stmt.failed())
-            consume_end_statement();
+        
+        if (!at_end() && !consume('\n') && !consume(';'))
+            throw fail(
+                "Missing end of statement!",
+                "You must cannot be followed by anything other than a newline or a semicolon ';'"
+            );
+
         return stmt;
+    }
+
+    syntax parse() {
+        try {
+            return statement();
+        } catch(const failure& f) {
+            std::cerr << "\033[1;31m";
+            std::cerr << f.title << '\n';
+            std::cerr << "The use of '" << f.bad_token << "' is not supported here:\n";
+            std::cerr << "\033[0m";
+            std::cerr << tokenizer.scanner.source << '\n';
+            std::cerr << "\033[1;32m";
+            int position = f.bad_token.position - tokenizer.scanner.source;
+            for (int i = 0; i < position; ++i)
+                std::cerr << ' ';
+            for (int i = 0; i < f.bad_token.length; ++i)
+                std::cerr << "↑";
+            std::cerr << '\n';
+            std::cerr << "\033[1;31m";
+            if (f.after_message)
+                std::cerr << f.message << "'" << f.previous_token << "'" << f.after_message << '\n';
+            else
+                std::cerr << f.message << '\n';
+            std::cerr << "\033[0m";
+        }
+
+        return syntax::none();
     }
 };
